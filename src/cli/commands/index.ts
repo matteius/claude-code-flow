@@ -1,5 +1,5 @@
-import { CLI, success, error, warning, info, VERSION } from "../cli-core.js";
-import type { Command, CommandContext } from "../cli-core.js";
+import { CLI, success, error, warning, info, VERSION } from "../cli-core.ts";
+import type { Command, CommandContext } from "../cli-core.ts";
 import colors from "chalk";
 const { bold, blue, yellow } = colors;
 import { Orchestrator } from "../../core/orchestrator-fixed.js";

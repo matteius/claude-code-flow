@@ -1,5 +1,5 @@
-import { Command, CommandContext } from '../cli-core.js';
-import { success, error, warning, info } from '../cli-core.js';
+import { Command, CommandContext } from '../cli-core.ts';
+import { success, error, warning, info } from '../cli-core.ts';
 import colors from 'chalk';
 import { ProjectManager, Project } from '../../enterprise/project-manager.js';
 import { DeploymentManager, Deployment, DeploymentEnvironment } from '../../enterprise/deployment-manager.js';

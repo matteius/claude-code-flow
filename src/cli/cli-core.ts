@@ -289,7 +289,7 @@ export type { Command, CommandContext, Option };
 
 // Main CLI setup if running directly
 async function main() {
-  if (process.argv[1] && (process.argv[1].endsWith('cli-core.js') || process.argv[1].endsWith('cli-core.ts'))) {
+  if (process.argv[1] && (process.argv[1].endsWith('cli-core.ts') || process.argv[1].endsWith('cli-core.ts'))) {
     const cli = new CLI("claude-flow", "Advanced AI Agent Orchestration System");
 
     // Import and register all commands

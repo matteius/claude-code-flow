@@ -1,5 +1,5 @@
-import { success, error, warning, info } from "../cli-core.js";
-import type { CommandContext } from "../cli-core.js";
+import { success, error, warning, info } from "../cli-core.ts";
+import type { CommandContext } from "../cli-core.ts";
 import colors from "chalk";
 const { blue, yellow, green, magenta, cyan } = colors;
 

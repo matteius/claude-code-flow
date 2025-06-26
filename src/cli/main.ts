@@ -3,7 +3,7 @@
  * Claude-Flow CLI - Main entry point for Node.js
  */
 
-import { CLI, VERSION } from "./cli-core.js";
+import { CLI, VERSION } from "./cli-core.ts";
 import { setupCommands } from "./commands/index.js";
 import { fileURLToPath } from "node:url";
 import { dirname } from "node:path";
