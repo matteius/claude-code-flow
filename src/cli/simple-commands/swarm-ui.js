@@ -2,13 +2,55 @@
 
 /**
  * Enhanced Swarm UI with real-time monitoring and control
- * Uses blessed for terminal UI
+ * Uses blessed for terminal UI with WSL compatibility
  */
 
-const blessed = require('blessed');
 const fs = require('fs').promises;
 const path = require('path');
 const { spawn } = require('child_process');
+
+// Check if raw mode is supported before importing blessed
+function isRawModeSupported() {
+  // Check for WSL
+  if (process.env.WSL_DISTRO_NAME || process.env.WSLENV) {
+    return false;
+  }
+
+  // Check for CI/CD environments
+  if (process.env.CI || process.env.GITHUB_ACTIONS || process.env.JENKINS_URL) {
+    return false;
+  }
+
+  // Check if we're in a TTY
+  if (!process.stdin.isTTY) {
+    return false;
+  }
+
+  // Check if setRawMode is available
+  if (typeof process.stdin.setRawMode !== 'function') {
+    return false;
+  }
+
+  // Test raw mode capability
+  try {
+    const originalRawMode = process.stdin.isRaw;
+    process.stdin.setRawMode(true);
+    process.stdin.setRawMode(originalRawMode || false);
+    return true;
+  } catch (error) {
+    return false;
+  }
+}
+
+// Only import blessed if raw mode is supported
+let blessed = null;
+if (isRawModeSupported()) {
+  try {
+    blessed = require('blessed');
+  } catch (error) {
+    console.error('Failed to load blessed library:', error.message);
+  }
+}
 
 class SwarmUI {
   constructor() {
@@ -632,15 +674,57 @@ class SwarmUI {
   }
 }
 
+// Fallback function for environments without blessed support
+async function fallbackMode() {
+  console.log('🐝 Claude-Flow Swarm - Text Mode (WSL Compatible)');
+  console.log('═'.repeat(60));
+  console.log('⚠️  Interactive UI not supported in this environment');
+  console.log('📊 Reason: Raw mode not available (WSL, CI/CD, or limited terminal)');
+  console.log('');
+  
+  // Show environment info
+  console.log('📊 Environment Information:');
+  console.log(`  • Platform: ${process.platform}`);
+  console.log(`  • WSL: ${process.env.WSL_DISTRO_NAME ? 'Yes (' + process.env.WSL_DISTRO_NAME + ')' : 'No'}`);
+  console.log(`  • TTY: ${process.stdin.isTTY ? 'Yes' : 'No'}`);
+  console.log(`  • Raw Mode: ${isRawModeSupported() ? 'Supported' : 'Not Supported'}`);
+  console.log('');
+  
+  // Show available commands
+  console.log('📋 Available Commands:');
+  console.log('  • claude-flow swarm "<objective>" --no-ui - Create new swarm (text mode)');
+  console.log('  • claude-flow swarm list - List active swarms');
+  console.log('  • claude-flow swarm status <id> - Show swarm status');
+  console.log('  • claude-flow status - Show system status');
+  console.log('  • claude-flow monitor - Monitor system activity');
+  console.log('');
+  
+  console.log('💡 For real-time monitoring, use:');
+  console.log('  watch -n 2 "claude-flow status"');
+  console.log('');
+  
+  console.log('💡 To enable interactive UI:');
+  console.log('  • Use Windows Terminal or external terminal');
+  console.log('  • Run outside of VS Code integrated terminal');
+  console.log('  • Use native Linux terminal (not WSL)');
+}
+
 // Main execution
 async function main() {
+  // Check if blessed is available and raw mode is supported
+  if (!blessed || !isRawModeSupported()) {
+    await fallbackMode();
+    return;
+  }
+  
   const ui = new SwarmUI();
   
   try {
     await ui.init();
   } catch (error) {
     console.error('Failed to initialize Swarm UI:', error);
-    process.exit(1);
+    console.log('Falling back to text mode...');
+    await fallbackMode();
   }
 }
 

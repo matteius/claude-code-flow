@@ -79,39 +79,19 @@ export async function swarmAction(ctx: CommandContext) {
     return;
   }
   
-  // If UI mode is requested, use the blessed UI version
+  // If UI mode is requested, use the compatibility layer
   if (options.ui) {
     try {
-      const scriptPath = new URL(import.meta.url).pathname;
-      const projectRoot = scriptPath.substring(0, scriptPath.indexOf('/src/'));
-      const uiScriptPath = `${projectRoot}/src/cli/simple-commands/swarm-ui.js`;
+      const { CompatibleUI } = await import('../ui/compatible-ui.js');
+      const ui = new CompatibleUI({
+        fallbackToText: true,
+        enableMonitoring: options.monitor
+      });
       
-      // Check if the UI script exists
-      try {
-        await Deno.stat(uiScriptPath);
-      } catch {
-        warning('Swarm UI script not found. Falling back to standard mode.');
-        options.ui = false;
-      }
-      
-      if (options.ui) {
-        const command = new Deno.Command('node', {
-          args: [uiScriptPath],
-          stdin: 'inherit',
-          stdout: 'inherit',
-          stderr: 'inherit',
-        });
-        
-        const process = command.spawn();
-        const { code } = await process.status;
-        
-        if (code !== 0) {
-          error(`Swarm UI exited with code ${code}`);
-        }
-        return;
-      }
+      await ui.launchUI('swarm', [objective]);
+      return;
     } catch (err) {
-      warning(`Failed to launch blessed UI: ${(err as Error).message}`);
+      warning(`Failed to launch UI: ${(err as Error).message}`);
       console.log('Falling back to standard mode...');
       options.ui = false;
     }

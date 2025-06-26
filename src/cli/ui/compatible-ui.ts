@@ -1,389 +1,404 @@
+#!/usr/bin/env node
+
 /**
- * Compatible Terminal UI - Works without raw mode
- * Designed for environments that don't support stdin raw mode
+ * UI Compatibility Layer for Claude-Flow
+ * Handles environments where raw mode is not supported (WSL, CI/CD, etc.)
  */
 
-import readline from 'readline';
-import chalk from 'chalk';
+import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-export interface UIProcess {
-  id: string;
-  name: string;
-  status: 'running' | 'stopped' | 'starting' | 'stopping' | 'error' | 'crashed';
-  type: string;
-  pid?: number;
-  startTime?: number;
-  metrics?: {
-    cpu?: number;
-    memory?: number;
-    restarts?: number;
-    lastError?: string;
-  };
-}
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
-export interface UISystemStats {
-  totalProcesses: number;
-  runningProcesses: number;
-  errorProcesses: number;
+export interface UIOptions {
+  fallbackToText?: boolean;
+  enableMonitoring?: boolean;
+  logLevel?: 'debug' | 'info' | 'warn' | 'error';
 }
 
 export class CompatibleUI {
-  private processes: UIProcess[] = [];
-  private running = false;
-  private rl: readline.Interface;
+  private options: UIOptions;
 
-  constructor() {
-    this.rl = readline.createInterface({
-      input: process.stdin,
-      output: process.stdout,
-      terminal: false // Don't require raw mode
-    });
-  }
-
-  async start(): Promise<void> {
-    this.running = true;
-    
-    // Initial render
-    this.render();
-    
-    // Setup command loop
-    while (this.running) {
-      const command = await this.promptCommand();
-      await this.handleCommand(command);
-    }
-  }
-
-  stop(): void {
-    this.running = false;
-    this.rl.close();
-    console.clear();
-  }
-
-  updateProcesses(processes: UIProcess[]): void {
-    this.processes = processes;
-    if (this.running) {
-      this.render();
-    }
-  }
-
-  private async promptCommand(): Promise<string> {
-    return new Promise((resolve) => {
-      this.rl.question('\nCommand: ', (answer) => {
-        resolve(answer.trim());
-      });
-    });
-  }
-
-  private async handleCommand(input: string): Promise<void> {
-    switch (input.toLowerCase()) {
-      case 'q':
-      case 'quit':
-      case 'exit':
-        await this.handleExit();
-        break;
-        
-      case 'r':
-      case 'refresh':
-        this.render();
-        break;
-        
-      case 'h':
-      case 'help':
-      case '?':
-        this.showHelp();
-        break;
-        
-      case 's':
-      case 'status':
-        this.showStatus();
-        break;
-        
-      case 'l':
-      case 'list':
-        this.showProcessList();
-        break;
-        
-      default:
-        // Check if it's a number (process selection)
-        const num = parseInt(input);
-        if (!isNaN(num) && num >= 1 && num <= this.processes.length) {
-          await this.showProcessDetails(this.processes[num - 1]);
-        } else {
-          console.log(chalk.yellow('Invalid command. Type "h" for help.'));
-        }
-        break;
-    }
-  }
-
-  private render(): void {
-    console.clear();
-    const stats = this.getSystemStats();
-
-    // Header
-    console.log(chalk.cyan.bold('🧠 Claude-Flow System Monitor'));
-    console.log(chalk.gray('─'.repeat(60)));
-    
-    // System stats
-    console.log(chalk.white('System Status:'), 
-      chalk.green(`${stats.runningProcesses}/${stats.totalProcesses} running`));
-    
-    if (stats.errorProcesses > 0) {
-      console.log(chalk.red(`⚠️  ${stats.errorProcesses} processes with errors`));
-    }
-    
-    console.log();
-
-    // Process list
-    console.log(chalk.white.bold('Processes:'));
-    console.log(chalk.gray('─'.repeat(60)));
-    
-    if (this.processes.length === 0) {
-      console.log(chalk.gray('No processes configured'));
-    } else {
-      this.processes.forEach((process, index) => {
-        const num = `[${index + 1}]`.padEnd(4);
-        const status = this.getStatusDisplay(process.status);
-        const name = process.name.padEnd(25);
-        
-        console.log(`${chalk.gray(num)} ${status} ${chalk.white(name)}`);
-        
-        if (process.metrics?.lastError) {
-          console.log(chalk.red(`       Error: ${process.metrics.lastError}`));
-        }
-      });
-    }
-
-    // Footer
-    console.log(chalk.gray('─'.repeat(60)));
-    console.log(chalk.gray('Commands: [1-9] Process details [s] Status [l] List [r] Refresh [h] Help [q] Quit'));
-  }
-
-  private showStatus(): void {
-    const stats = this.getSystemStats();
-    
-    console.log();
-    console.log(chalk.cyan.bold('📊 System Status Details'));
-    console.log(chalk.gray('─'.repeat(40)));
-    console.log(chalk.white('Total Processes:'), stats.totalProcesses);
-    console.log(chalk.white('Running:'), chalk.green(stats.runningProcesses));
-    console.log(chalk.white('Stopped:'), chalk.gray(stats.totalProcesses - stats.runningProcesses - stats.errorProcesses));
-    console.log(chalk.white('Errors:'), chalk.red(stats.errorProcesses));
-    console.log(chalk.white('System Load:'), this.getSystemLoad());
-    console.log(chalk.white('Uptime:'), this.getSystemUptime());
-  }
-
-  private showProcessList(): void {
-    console.log();
-    console.log(chalk.cyan.bold('📋 Process List'));
-    console.log(chalk.gray('─'.repeat(60)));
-    
-    if (this.processes.length === 0) {
-      console.log(chalk.gray('No processes configured'));
-      return;
-    }
-
-    this.processes.forEach((process, index) => {
-      console.log(`${chalk.gray(`[${index + 1}]`)} ${this.getStatusDisplay(process.status)} ${chalk.white.bold(process.name)}`);
-      console.log(chalk.gray(`    Type: ${process.type}`));
-      
-      if (process.pid) {
-        console.log(chalk.gray(`    PID: ${process.pid}`));
-      }
-      
-      if (process.startTime) {
-        const uptime = Date.now() - process.startTime;
-        console.log(chalk.gray(`    Uptime: ${this.formatUptime(uptime)}`));
-      }
-      
-      if (process.metrics) {
-        if (process.metrics.cpu !== undefined) {
-          console.log(chalk.gray(`    CPU: ${process.metrics.cpu.toFixed(1)}%`));
-        }
-        if (process.metrics.memory !== undefined) {
-          console.log(chalk.gray(`    Memory: ${process.metrics.memory.toFixed(0)} MB`));
-        }
-      }
-      
-      console.log();
-    });
-  }
-
-  private async showProcessDetails(process: UIProcess): Promise<void> {
-    console.log();
-    console.log(chalk.cyan.bold(`📋 Process Details: ${process.name}`));
-    console.log(chalk.gray('─'.repeat(60)));
-    
-    console.log(chalk.white('ID:'), process.id);
-    console.log(chalk.white('Type:'), process.type);
-    console.log(chalk.white('Status:'), this.getStatusDisplay(process.status), process.status);
-    
-    if (process.pid) {
-      console.log(chalk.white('PID:'), process.pid);
-    }
-    
-    if (process.startTime) {
-      const uptime = Date.now() - process.startTime;
-      console.log(chalk.white('Uptime:'), this.formatUptime(uptime));
-    }
-    
-    if (process.metrics) {
-      console.log();
-      console.log(chalk.white.bold('Metrics:'));
-      if (process.metrics.cpu !== undefined) {
-        console.log(chalk.white('CPU:'), `${process.metrics.cpu.toFixed(1)}%`);
-      }
-      if (process.metrics.memory !== undefined) {
-        console.log(chalk.white('Memory:'), `${process.metrics.memory.toFixed(0)} MB`);
-      }
-      if (process.metrics.restarts !== undefined) {
-        console.log(chalk.white('Restarts:'), process.metrics.restarts);
-      }
-      if (process.metrics.lastError) {
-        console.log(chalk.red('Last Error:'), process.metrics.lastError);
-      }
-    }
-  }
-
-  private getStatusDisplay(status: string): string {
-    switch (status) {
-      case 'running':
-        return chalk.green('●');
-      case 'stopped':
-        return chalk.gray('○');
-      case 'starting':
-        return chalk.yellow('◐');
-      case 'stopping':
-        return chalk.yellow('◑');
-      case 'error':
-        return chalk.red('✗');
-      case 'crashed':
-        return chalk.red('☠');
-      default:
-        return chalk.gray('?');
-    }
-  }
-
-  private getSystemStats(): UISystemStats {
-    return {
-      totalProcesses: this.processes.length,
-      runningProcesses: this.processes.filter(p => p.status === 'running').length,
-      errorProcesses: this.processes.filter(p => p.status === 'error' || p.status === 'crashed').length
+  constructor(options: UIOptions = {}) {
+    this.options = {
+      fallbackToText: true,
+      enableMonitoring: false,
+      logLevel: 'info',
+      ...options
     };
   }
 
-  private getSystemLoad(): string {
-    // Simulate system load
-    return '0.45, 0.52, 0.48';
-  }
+  /**
+   * Check if the current environment supports interactive UI
+   */
+  static isUISupported(): boolean {
+    // Check if we're in a TTY
+    if (!process.stdin.isTTY) {
+      return false;
+    }
 
-  private getSystemUptime(): string {
-    const uptime = process.uptime() * 1000;
-    return this.formatUptime(uptime);
-  }
+    // Check if raw mode is available
+    if (typeof process.stdin.setRawMode !== 'function') {
+      return false;
+    }
 
-  private formatUptime(ms: number): string {
-    const seconds = Math.floor(ms / 1000);
-    const minutes = Math.floor(seconds / 60);
-    const hours = Math.floor(minutes / 60);
-    const days = Math.floor(hours / 24);
+    // Check for known problematic environments
+    const isWSL = process.env.WSL_DISTRO_NAME || process.env.WSLENV;
+    const isCI = process.env.CI || process.env.GITHUB_ACTIONS || process.env.JENKINS_URL;
+    const isVSCode = process.env.TERM_PROGRAM === 'vscode';
 
-    if (days > 0) {
-      return `${days}d ${hours % 24}h`;
-    } else if (hours > 0) {
-      return `${hours}h ${minutes % 60}m`;
-    } else if (minutes > 0) {
-      return `${minutes}m ${seconds % 60}s`;
-    } else {
-      return `${seconds}s`;
+    if (isWSL || isCI) {
+      return false;
+    }
+
+    // Test raw mode capability
+    try {
+      const originalRawMode = process.stdin.isRaw;
+      process.stdin.setRawMode(true);
+      process.stdin.setRawMode(originalRawMode || false);
+      return true;
+    } catch (error) {
+      return false;
     }
   }
 
-  private showHelp(): void {
-    console.log();
-    console.log(chalk.cyan.bold('🧠 Claude-Flow System Monitor - Help'));
-    console.log(chalk.gray('─'.repeat(60)));
-    console.log();
-    console.log(chalk.white.bold('Commands:'));
-    console.log('  1-9     - Show process details by number');
-    console.log('  s       - Show system status');
-    console.log('  l       - List all processes');
-    console.log('  r       - Refresh display');
-    console.log('  h/?     - Show this help');
-    console.log('  q       - Quit');
-    console.log();
-    console.log(chalk.white.bold('Features:'));
-    console.log('  • Non-interactive mode (works in any terminal)');
-    console.log('  • Real-time process monitoring');
-    console.log('  • System statistics');
-    console.log('  • Compatible with VS Code, CI/CD, containers');
+  /**
+   * Launch UI with compatibility checks
+   */
+  async launchUI(uiType: 'swarm' | 'monitor' | 'dashboard', args: string[] = []): Promise<void> {
+    const isSupported = CompatibleUI.isUISupported();
+
+    if (!isSupported) {
+      console.log('⚠️  Interactive UI not supported in this environment');
+      console.log('📊 Reason: Raw mode not available (WSL, CI/CD, or limited terminal)');
+      
+      if (this.options.fallbackToText) {
+        console.log('🔄 Falling back to text-based interface...\n');
+        await this.launchTextFallback(uiType, args);
+      } else {
+        console.log('💡 Suggestions:');
+        console.log('  • Use --no-ui flag to disable UI');
+        console.log('  • Run in external terminal (not VS Code integrated)');
+        console.log('  • Use text-based commands instead');
+        throw new Error('UI not supported in current environment');
+      }
+      return;
+    }
+
+    // Try to launch the blessed UI
+    try {
+      await this.launchBlessedUI(uiType, args);
+    } catch (error) {
+      console.log(`⚠️  Failed to launch blessed UI: ${error.message}`);
+      
+      if (this.options.fallbackToText) {
+        console.log('🔄 Falling back to text-based interface...\n');
+        await this.launchTextFallback(uiType, args);
+      } else {
+        throw error;
+      }
+    }
   }
 
-  private async handleExit(): Promise<void> {
-    const runningProcesses = this.processes.filter(p => p.status === 'running');
+  /**
+   * Launch blessed-based UI
+   */
+  private async launchBlessedUI(uiType: string, args: string[]): Promise<void> {
+    const scriptPath = this.getUIScriptPath(uiType);
     
-    if (runningProcesses.length > 0) {
-      console.log();
-      console.log(chalk.yellow(`⚠️  ${runningProcesses.length} processes are still running.`));
-      console.log('These processes will continue running in the background.');
-      console.log('Use the main CLI to stop them if needed.');
+    if (!existsSync(scriptPath)) {
+      throw new Error(`UI script not found: ${scriptPath}`);
     }
+
+    return new Promise((resolve, reject) => {
+      const process = spawn('node', [scriptPath, ...args], {
+        stdio: 'inherit',
+        env: {
+          ...process.env,
+          FORCE_COLOR: '1',
+          TERM: process.env.TERM || 'xterm-256color'
+        }
+      });
+
+      process.on('error', (error) => {
+        reject(new Error(`Failed to launch UI: ${error.message}`));
+      });
+
+      process.on('exit', (code) => {
+        if (code === 0) {
+          resolve();
+        } else {
+          reject(new Error(`UI process exited with code ${code}`));
+        }
+      });
+    });
+  }
+
+  /**
+   * Launch text-based fallback interface
+   */
+  private async launchTextFallback(uiType: string, args: string[]): Promise<void> {
+    switch (uiType) {
+      case 'swarm':
+        await this.launchSwarmTextInterface(args);
+        break;
+      case 'monitor':
+        await this.launchMonitorTextInterface(args);
+        break;
+      case 'dashboard':
+        await this.launchDashboardTextInterface(args);
+        break;
+      default:
+        console.log(`📋 Text interface for ${uiType} not implemented`);
+        console.log('💡 Use standard CLI commands instead');
+    }
+  }
+
+  /**
+   * Text-based swarm interface
+   */
+  private async launchSwarmTextInterface(args: string[]): Promise<void> {
+    console.log('🐝 Claude-Flow Swarm - Text Interface');
+    console.log('═'.repeat(50));
     
-    this.stop();
-  }
-}
-
-// Factory function to create UI instances
-export function createCompatibleUI(): CompatibleUI {
-  return new CompatibleUI();
-}
-
-// Check if raw mode is supported
-export function isRawModeSupported(): boolean {
-  try {
-    return process.stdin.isTTY && typeof process.stdin.setRawMode === 'function';
-  } catch {
-    return false;
-  }
-}
-
-// Fallback UI launcher that chooses the best available UI
-export async function launchUI(): Promise<void> {
-  const ui = createCompatibleUI();
-  
-  // Mock some example processes for demonstration
-  const mockProcesses: UIProcess[] = [
-    {
-      id: 'orchestrator',
-      name: 'Orchestrator Engine',
-      status: 'running',
-      type: 'core',
-      pid: 12345,
-      startTime: Date.now() - 30000,
-      metrics: { cpu: 2.1, memory: 45.2, restarts: 0 }
-    },
-    {
-      id: 'memory-manager',
-      name: 'Memory Manager',
-      status: 'running',
-      type: 'service',
-      pid: 12346,
-      startTime: Date.now() - 25000,
-      metrics: { cpu: 0.8, memory: 12.5, restarts: 0 }
-    },
-    {
-      id: 'mcp-server',
-      name: 'MCP Server',
-      status: 'stopped',
-      type: 'server',
-      metrics: { restarts: 1 }
+    // Show current swarm status
+    await this.showSwarmStatus();
+    
+    // Show available commands
+    console.log('\n📋 Available Commands:');
+    console.log('  • claude-flow swarm "<objective>" - Create new swarm');
+    console.log('  • claude-flow swarm list - List active swarms');
+    console.log('  • claude-flow swarm status <id> - Show swarm status');
+    console.log('  • claude-flow status - Show system status');
+    console.log('  • claude-flow monitor - Monitor system activity');
+    
+    console.log('\n💡 For real-time monitoring, use:');
+    console.log('  watch -n 2 "claude-flow status"');
+    
+    // If monitoring is enabled, start a simple text monitor
+    if (this.options.enableMonitoring) {
+      await this.startTextMonitoring();
     }
+  }
+
+  /**
+   * Text-based monitor interface
+   */
+  private async launchMonitorTextInterface(args: string[]): Promise<void> {
+    console.log('📊 Claude-Flow Monitor - Text Interface');
+    console.log('═'.repeat(50));
+    
+    await this.startTextMonitoring();
+  }
+
+  /**
+   * Text-based dashboard interface
+   */
+  private async launchDashboardTextInterface(args: string[]): Promise<void> {
+    console.log('📈 Claude-Flow Dashboard - Text Interface');
+    console.log('═'.repeat(50));
+    
+    await this.showSystemDashboard();
+  }
+
+  /**
+   * Show current swarm status
+   */
+  private async showSwarmStatus(): Promise<void> {
+    try {
+      const fs = await import('fs/promises');
+      const swarmRunsDir = './swarm-runs';
+      
+      try {
+        const runs = await fs.readdir(swarmRunsDir);
+        
+        if (runs.length === 0) {
+          console.log('📋 No active swarms found');
+          return;
+        }
+
+        console.log(`\n🐝 Active Swarms (${runs.length}):`);
+        console.log('─'.repeat(50));
+        
+        for (const runDir of runs.slice(0, 5)) { // Show max 5 recent
+          try {
+            const configPath = join(swarmRunsDir, runDir, 'config.json');
+            const configData = await fs.readFile(configPath, 'utf-8');
+            const config = JSON.parse(configData);
+            
+            const startTime = new Date(config.startTime).toLocaleString();
+            console.log(`  🆔 ${config.swarmId}`);
+            console.log(`     📝 ${config.objective}`);
+            console.log(`     ⏰ Started: ${startTime}`);
+            console.log(`     🎯 Strategy: ${config.options?.strategy || 'auto'}`);
+            console.log();
+          } catch (e) {
+            // Skip invalid configs
+          }
+        }
+        
+        if (runs.length > 5) {
+          console.log(`     ... and ${runs.length - 5} more`);
+        }
+      } catch (e) {
+        console.log('📋 No swarm runs directory found');
+      }
+    } catch (error) {
+      console.log(`⚠️  Error reading swarm status: ${error.message}`);
+    }
+  }
+
+  /**
+   * Show system dashboard
+   */
+  private async showSystemDashboard(): Promise<void> {
+    console.log('\n📊 System Status:');
+    console.log('─'.repeat(30));
+    
+    // Show basic system info
+    console.log(`  🖥️  Platform: ${process.platform}`);
+    console.log(`  📦 Node.js: ${process.version}`);
+    console.log(`  💾 Memory: ${Math.round(process.memoryUsage().heapUsed / 1024 / 1024)}MB`);
+    console.log(`  ⏱️  Uptime: ${Math.round(process.uptime())}s`);
+    
+    // Check for active processes
+    console.log('\n🔄 Active Components:');
+    console.log('  • CLI: ✅ Running');
+    console.log('  • Orchestrator: ⚠️  Not started');
+    console.log('  • MCP Server: ⚠️  Not started');
+    console.log('  • Web UI: ⚠️  Not started');
+    
+    console.log('\n💡 To start components:');
+    console.log('  claude-flow start --ui');
+    console.log('  claude-flow mcp start');
+  }
+
+  /**
+   * Start simple text monitoring
+   */
+  private async startTextMonitoring(): Promise<void> {
+    console.log('\n👀 Starting text monitoring (Ctrl+C to stop)...');
+    console.log('─'.repeat(50));
+    
+    const monitorInterval = setInterval(async () => {
+      const timestamp = new Date().toLocaleTimeString();
+      console.log(`\n[${timestamp}] System Check:`);
+      
+      // Check memory usage
+      const memUsage = process.memoryUsage();
+      console.log(`  💾 Memory: ${Math.round(memUsage.heapUsed / 1024 / 1024)}MB`);
+      
+      // Check for new swarm activity
+      try {
+        const fs = await import('fs/promises');
+        const swarmRunsDir = './swarm-runs';
+        const runs = await fs.readdir(swarmRunsDir);
+        console.log(`  🐝 Active swarms: ${runs.length}`);
+      } catch (e) {
+        console.log(`  🐝 Active swarms: 0`);
+      }
+      
+      console.log('  ⏰ Next check in 5 seconds...');
+    }, 5000);
+
+    // Handle Ctrl+C
+    process.on('SIGINT', () => {
+      clearInterval(monitorInterval);
+      console.log('\n\n👋 Monitoring stopped');
+      process.exit(0);
+    });
+
+    // Keep the process alive
+    await new Promise(() => {}); // Never resolves, keeps monitoring running
+  }
+
+  /**
+   * Get the path to UI script
+   */
+  private getUIScriptPath(uiType: string): string {
+    const projectRoot = join(__dirname, '../../..');
+    
+    switch (uiType) {
+      case 'swarm':
+        return join(projectRoot, 'src/cli/simple-commands/swarm-ui.js');
+      case 'monitor':
+        return join(projectRoot, 'src/cli/simple-commands/monitor-ui.js');
+      case 'dashboard':
+        return join(projectRoot, 'src/cli/simple-commands/dashboard-ui.js');
+      default:
+        throw new Error(`Unknown UI type: ${uiType}`);
+    }
+  }
+}
+
+/**
+ * Utility function to check UI support
+ */
+export function checkUISupport(): { supported: boolean; reason?: string; suggestions: string[] } {
+  const suggestions = [
+    'Use --no-ui flag to disable UI',
+    'Run in external terminal (not VS Code integrated)',
+    'Use text-based commands instead',
+    'Try running in a different terminal application'
   ];
-  
-  ui.updateProcesses(mockProcesses);
-  
-  console.log(chalk.green('✅ Starting Claude-Flow UI (compatible mode)'));
-  console.log(chalk.gray('Note: Using compatible UI mode for broader terminal support'));
-  console.log();
-  
-  await ui.start();
+
+  if (!process.stdin.isTTY) {
+    return {
+      supported: false,
+      reason: 'Not running in a TTY environment',
+      suggestions
+    };
+  }
+
+  if (typeof process.stdin.setRawMode !== 'function') {
+    return {
+      supported: false,
+      reason: 'Raw mode not available',
+      suggestions
+    };
+  }
+
+  const isWSL = process.env.WSL_DISTRO_NAME || process.env.WSLENV;
+  if (isWSL) {
+    return {
+      supported: false,
+      reason: 'Running in WSL environment',
+      suggestions: [
+        'Use Windows Terminal or external terminal',
+        'Use --no-ui flag to disable UI',
+        'Use text-based commands instead'
+      ]
+    };
+  }
+
+  const isCI = process.env.CI || process.env.GITHUB_ACTIONS || process.env.JENKINS_URL;
+  if (isCI) {
+    return {
+      supported: false,
+      reason: 'Running in CI/CD environment',
+      suggestions: [
+        'Use --no-ui flag in CI/CD scripts',
+        'Use text-based commands for automation'
+      ]
+    };
+  }
+
+  try {
+    const originalRawMode = process.stdin.isRaw;
+    process.stdin.setRawMode(true);
+    process.stdin.setRawMode(originalRawMode || false);
+    return { supported: true, suggestions: [] };
+  } catch (error) {
+    return {
+      supported: false,
+      reason: `Raw mode test failed: ${error.message}`,
+      suggestions
+    };
+  }
 }
+
+// Export for CLI usage
+export default CompatibleUI;
