@@ -2867,6 +2867,62 @@ Use ▶ to indicate actionable items`;
         console.log(`📝 Prompt written to: ${promptFile}`);
         console.log(`📏 Prompt length: ${swarmPrompt.length} characters`);
         
+        // Check if we're in WSL or other environment that doesn't support raw mode
+        const isWSL = process.env.WSL_DISTRO_NAME || process.env.WSLENV;
+        const isCI = process.env.CI || process.env.GITHUB_ACTIONS || process.env.JENKINS_URL;
+        const isVSCode = process.env.TERM_PROGRAM === 'vscode';
+        
+        if (isWSL || isCI || !process.stdin.isTTY) {
+          console.log('🐝 Claude-Flow Swarm - WSL Compatible Mode');
+          console.log('═'.repeat(60));
+          console.log('⚠️  Interactive Claude Code not supported in this environment');
+          console.log('📊 Reason: Raw mode not available (WSL, CI/CD, or limited terminal)');
+          console.log('');
+          
+          // Show environment info
+          console.log('📊 Environment Information:');
+          console.log(`  • Platform: ${process.platform}`);
+          console.log(`  • WSL: ${isWSL ? 'Yes (' + (process.env.WSL_DISTRO_NAME || 'detected') + ')' : 'No'}`);
+          console.log(`  • TTY: ${process.stdin.isTTY ? 'Yes' : 'No'}`);
+          console.log(`  • CI/CD: ${isCI ? 'Yes' : 'No'}`);
+          console.log('');
+          
+          // Show what the swarm would do
+          console.log('🚀 Swarm Execution Plan:');
+          console.log('  1. Initialize swarm coordination system');
+          console.log('  2. Create task breakdown based on strategy');
+          console.log('  3. Spawn agents for parallel execution');
+          console.log('  4. Monitor progress and collect results');
+          console.log('  5. Generate final report');
+          console.log('');
+          
+          // Show the generated prompt for manual use
+          console.log('💡 Generated SPARC Prompt for Manual Use:');
+          console.log('─'.repeat(60));
+          console.log(swarmPrompt);
+          console.log('─'.repeat(60));
+          console.log('');
+          
+          console.log('💡 To run this swarm:');
+          console.log('  1. Copy the prompt above');
+          console.log('  2. Open Claude Code in a supported terminal');
+          console.log('  3. Paste and execute the prompt');
+          console.log('');
+          console.log('💡 Alternative approaches:');
+          console.log('  • Use Windows Terminal or external terminal');
+          console.log('  • Run outside of VS Code integrated terminal');
+          console.log('  • Use native Linux terminal (not WSL)');
+          
+          // Cleanup temp file
+          try {
+            await fs.unlink(promptFile);
+          } catch (err) {
+            // Ignore cleanup errors
+          }
+          
+          return;
+        }
+        
         // Launch claude with the prompt file
         const claudeProcess = spawn('bash', ['-c', `cat "${promptFile}" | claude --dangerously-skip-permissions`], {
           stdio: 'inherit',
