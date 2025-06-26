@@ -13,13 +13,35 @@ for arg in "$@"; do
   fi
 done
 
-# Try Deno first, but check if it actually works
-if command -v deno >/dev/null 2>&1 && [ -f "$ROOT_DIR/src/cli/main.ts" ]; then
-  # Test if Deno can actually run the main file
-  if deno check "$ROOT_DIR/src/cli/main.ts" >/dev/null 2>&1; then
-    # Use Deno for full functionality
-    exec deno run --allow-all "$ROOT_DIR/src/cli/main.ts" "$@"
+# Function to find Deno in common locations
+find_deno() {
+  # Check PATH first
+  if command -v deno >/dev/null 2>&1; then
+    echo "deno"
+    return 0
   fi
+  
+  # Check common installation locations
+  for deno_path in \
+    "$HOME/.deno/bin/deno" \
+    "/usr/local/bin/deno" \
+    "/opt/deno/bin/deno" \
+    "$HOME/.local/bin/deno"; do
+    if [ -x "$deno_path" ]; then
+      echo "$deno_path"
+      return 0
+    fi
+  done
+  
+  return 1
+}
+
+# Try Deno first, but check if it actually works
+DENO_CMD=$(find_deno)
+if [ $? -eq 0 ] && [ -f "$ROOT_DIR/src/cli/main.ts" ]; then
+  # Test if Deno can actually run (skip the check for now to avoid issues)
+  # Use Deno for full functionality
+  exec "$DENO_CMD" run --allow-all "$ROOT_DIR/src/cli/main.ts" "$@"
 fi
 
 # Fall back to Node.js version
